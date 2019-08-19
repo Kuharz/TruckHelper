@@ -1,6 +1,6 @@
 {
-  "latest": 0.2,
+  "latest": 0.1,
   "updateurl": "https://raw.githubusercontent.com/Kuharz/TruckHelper/master/Truck%20Helper.lua",
   "updlist": " • СПИСОК.",
-  "force": true
+  "force": false
 }
