@@ -220,7 +220,7 @@ function onRenderNotification()
 			end
 		end
 	end
-	if not sampTextdrawIsExists(2096) then
+	if not sampTextdrawIsExists(2110) then
 		sX, sY = ToScreen(630, 440)
    	else
 	   sX, sY = ToScreen(630, 390)
