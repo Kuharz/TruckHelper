@@ -1,6 +1,6 @@
 --[[
    Register HotKey for MoonLoader
-   Author: DonHomka
+   Author: DonHomkaqasasas
    Functions:
       - int id = registerHotKey(table keys, bool pressed, function callback)
       - unRegisterHotKey:
