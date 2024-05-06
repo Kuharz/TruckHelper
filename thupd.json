@@ -1,6 +1,6 @@
 {
   "latest": 1.2,
-  "updateurl": "https://raw.githubusercontent.com/Kuharz/TruckHelper/master/Truck%20Helper.lua",
+  "updateurl": "https://raw.githubusercontent.com/Kuharz/TruckHelper/master/!Truck%20Helper.lua",
   "updlist": " • Добавлены настройки для кастомизации HUDа: изменение шрифта, размера и стиль шрифта;
 • Добавлен антифлуд докладами через окно HUD - 10 секунд;
 • Добавлены подсказки при наведении курсора на элементы HUDa (названия портов и цены), подсказки содержат текст, который будет отправлен при нажатии на тот или иной элемент худа;
