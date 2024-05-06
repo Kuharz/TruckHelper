@@ -1,15 +1,61 @@
 -- This file is part of MoonImGui library
 -- Copyright (c) 2017, FYP <blast.hk>
 
-assert(getMoonloaderVersion() >= 025, 'Moon ImGui requires MoonLoader v.025 or greater.')
+assert(getMoonloaderVersion() >= 026, 'Moon ImGui requires MoonLoader v.026 or greater.')
 
 local imgui = require 'MoonImGui'
 local hwnd = readMemory(0x00C8CF88, 4, false)
 local renderer = imgui.ImGuiRenderer(getD3DDevicePtr(), hwnd)
 local winmsg = require 'windows.message'
 local bitex = require 'bitex'
+local memory = require 'memory'
+local ffi = require 'ffi'
 
-imgui._VERSION = '1.1.2'
+ffi.cdef [[
+    typedef unsigned long DWORD;
+    typedef void *HWND, *HMONITOR, *HDC;
+    typedef unsigned int UINT;
+    typedef long HRESULT;
+    typedef const char *LPCTSTR;
+    typedef const void *LPCVOID;
+    typedef signed __int64 INT64, *PINT64;
+    typedef unsigned int UINT_PTR, *PUINT_PTR;
+    typedef long LONG_PTR, *PLONG_PTR;
+    typedef UINT_PTR WPARAM;
+    typedef LONG_PTR LPARAM;
+    typedef LONG_PTR LRESULT;
+
+    enum {
+        LOGPIXELSX = 88,
+        LOGPIXELSY = 90,
+        MONITOR_DEFAULTTONEAREST = 0x00000002
+    };
+
+    typedef enum MONITOR_DPI_TYPE {
+        MDT_EFFECTIVE_DPI = 0,
+        MDT_ANGULAR_DPI = 1,
+        MDT_RAW_DPI = 2,
+        MDT_DEFAULT
+    } MONITOR_DPI_TYPE;
+
+    /* user32 */
+    HMONITOR __stdcall MonitorFromWindow(HWND hwnd, DWORD dwFlags);
+    HDC __stdcall GetDC(HWND hWnd);
+    int __stdcall ReleaseDC(HWND hWnd, HDC hDC);
+
+    /* gdi32 */
+    int __stdcall GetDeviceCaps(HDC hdc, int index);
+
+    /* shcore */
+    HRESULT __stdcall GetDpiForMonitor(HMONITOR hmonitor, MONITOR_DPI_TYPE dpiType, UINT *dpiX, UINT *dpiY);
+]]
+
+local REFERENCE_DPI = 96
+local shcore_dll
+local dpiScaling
+local dpiScale
+
+imgui._VERSION = '1.1.6'
 imgui.BeforeDrawFrame = nil
 imgui.OnDrawFrame = nil
 imgui.Process = false
@@ -353,6 +399,72 @@ setmetatable(ImColor, {
 	end
 })
 imgui.ImColor = ImColor
+
+local function GetDpiForMonitor(monitor)
+    if not shcore_dll then
+        shcore_dll = ffi.load('shcore')
+    end
+    local dpi = ffi.new('UINT[2]', REFERENCE_DPI, REFERENCE_DPI)
+    shcore_dll.GetDpiForMonitor(monitor, ffi.C.MDT_EFFECTIVE_DPI, dpi, dpi + 1)
+    return dpi[0]
+end
+
+local function GetDpiForMonitor_gdi(monitor)
+    local dc = ffi.C.GetDC(nil)
+    local xdpi = ffi.C.GetDeviceCaps(dc, ffi.C.LOGPIXELSX)
+    ffi.C.ReleaseDC(nil, dc)
+    return xdpi
+end
+
+local function GetDpiScaleForMonitor(monitor)
+    local ok, dpi = pcall(GetDpiForMonitor, monitor)
+    if not ok then
+        GetDpiForMonitor = GetDpiForMonitor_gdi
+        dpi = GetDpiForMonitor(monitor)
+    end
+    return dpi / REFERENCE_DPI
+end
+
+local function GetDpiScaleForWindow(hwnd)
+    local monitor = ffi.C.MonitorFromWindow(hwnd, ffi.C.MONITOR_DEFAULTTONEAREST)
+    return GetDpiScaleForMonitor(monitor)
+end
+
+local function ScaleFontSize(size_pixels)
+    return math.floor(imgui.GetDpiScale() * size_pixels)
+end
+
+local defaultSettings = {
+    display_settings = {
+        dpi_scaling_mode = 3
+    }
+}
+
+--  0: None
+--  1: ImGuiIO::FontGlobalScale
+--  2: ImGuiIO::FontGlobalScale + ImGuiStyle::ScaleAllSizes
+--  3: Default ImFontAtlas::AddFont* + ImGuiStyle::ScaleAllSizes
+--  4: All ImFontAtlas::AddFont* + ImGuiStyle::ScaleAllSizes
+function imgui.SetDpiScalingMode(v)
+    dpiScaling = v
+end
+
+function imgui.GetDpiScalingMode()
+    if not dpiScaling then
+        local inicfg = require('inicfg')
+        local data = inicfg.load(defaultSettings, 'moon-imgui\\moon-imgui.user')
+        data = inicfg.load(data, 'moon-imgui\\' .. script.this.filename .. '.user')
+        dpiScaling = data.display_settings.dpi_scaling_mode
+    end
+    return dpiScaling
+end
+
+function imgui.GetDpiScale()
+    if not dpiScale then
+        dpiScale = GetDpiScaleForWindow(ffi.cast('HWND', hwnd))
+    end
+    return dpiScale
+end
 
 --[[
 // dear imgui, v1.52
@@ -1336,18 +1448,27 @@ local function lock_player_controls(lock)
 	lockPlayerControl(lock)
 end
 
-local font_loaded = false
+local initialized, first_frame = false, true
 local glyph_ranges = nil
-local function load_default_font()
+local function initialize()
+	imgui.SwitchContext()
+
+    local dsm = imgui.GetDpiScalingMode()
+    if dsm == 1 or dsm == 2 then
+        imgui.GetIO().FontGlobalScale = imgui.GetDpiScale()
+    elseif dsm == 4 then
+        imgui.GetIO().Fonts.LoadFontScale = imgui.GetDpiScale()
+    end
+
 	local font_path = getFolderPath(0x14) .. '\\trebucbd.ttf'
 	assert(doesFileExist(font_path), 'WTF: Font "' .. font_path .. '" doesn\'t exist')
-	imgui.SwitchContext()
 	local builder = imgui.ImFontAtlasGlyphRangesBuilder()
 	builder:AddRanges(imgui.GetIO().Fonts:GetGlyphRangesCyrillic())
 	builder:AddText('‚„…†‡€‰‹‘’“”•–—™›№')
 	glyph_ranges = builder:BuildRanges()
-	imgui.GetIO().Fonts:AddFontFromFileTTF(font_path, 14.0, nil, glyph_ranges)
-	font_loaded = true
+    local fontSize = dsm == 3 and ScaleFontSize(14) or 14
+	imgui.GetIO().Fonts:AddFontFromFileTTF(font_path, fontSize, nil, glyph_ranges)
+	initialized = true
 end
 
 local function ready_to_process()
@@ -1365,13 +1486,21 @@ end
 
 local function on_draw_scene()
 	if ready_to_process() then
-		if not font_loaded then
-			load_default_font()
+		if not initialized then
+			initialize()
 		end
 		if imgui.BeforeDrawFrame then
 			imgui.SwitchContext()
 			imgui.BeforeDrawFrame()
 		end
+        if first_frame then
+            first_frame = false
+            imgui.SwitchContext()
+            local dsm = imgui.GetDpiScalingMode()
+            if dsm == 2 or dsm == 3 or dsm == 4 then
+                imgui.GetStyle():ScaleAllSizes(imgui.GetDpiScale())
+            end
+        end
 		renderer:BeginFrame()
 		if imgui.OnDrawFrame then
 			imgui.OnDrawFrame()
@@ -1413,6 +1542,9 @@ local function on_window_message(msg, wparam, lparam)
 		end
 	end
 end
+
+-- shift key bug fix
+memory.fill(0x00531155, 0x90, 5, true)
 
 -- initialization
 addEventHandler('onD3DDeviceLost', on_lost_device)
